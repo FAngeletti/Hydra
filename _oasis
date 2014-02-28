@@ -1,0 +1,13 @@
+OASISFormat: 0.4
+Name:        Hydra
+Version:     0.5
+Synopsis:    Python script inside latex file
+Authors:     F. Angeletti
+License:     GPL-3.0
+
+Executable "Hydra"
+  Path:       .
+  BuildTools: ocamlbuild
+  MainIs:     Hydra.ml
+  CompiledObject: best
+  
