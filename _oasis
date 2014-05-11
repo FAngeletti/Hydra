@@ -5,7 +5,7 @@ Synopsis:    Python script inside latex file
 Authors:     F. Angeletti
 License:     GPL-3.0
 
-Executable "Hydra"
+Executable "hydra"
   Path:       .
   BuildTools: ocamlbuild
   MainIs:     Hydra.ml
