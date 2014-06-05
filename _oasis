@@ -1,6 +1,6 @@
 OASISFormat: 0.4
 Name:        Hydra
-Version:     0.7
+Version:     0.7.1
 Synopsis:    Python script inside latex file
 Authors:     F. Angeletti
 License:     GPL-3.0

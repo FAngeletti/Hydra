@@ -39,34 +39,48 @@ let may f x= function
 | None -> x
 | Some y -> f x y
 
+type loc = { nchar : int ; ncol : int ; nline:int}
 type token = Raw of string | Keyword of string | End
+type localized_token = {start : loc; ende : loc ; token : token }
+  
 exception End_of_text
 
 let lex st= 
-	let ( -- ) start pos = String.sub st start (pos-start+1) in
+	let ( -- ) start pos = String.sub st (start.nchar) (pos.nchar-start.nchar+1) in
 	let token_stack =ref [] in
-	let glob_pos= ref 0 in
+	let glob_loc = ref {nchar=0; ncol=1; nline=1} in
+	let incr loc= {loc with nchar = loc.nchar+1; ncol=loc.ncol+1} in 
+	let incr_char loc c= 
+		let loc'= incr loc in	
+		match c with
+			| '\n' ->  {loc' with nline=loc.nline+1; ncol=1 } 
+			| _ -> loc'  
+	and decr loc k = {loc with nchar = loc.nchar-k; ncol=loc.ncol-k} in
+	let raw start ende = {start; ende ; token=Raw( start --ende) } in
 	let lmax = String.length st in
-	let commit start pos= glob_pos := pos+1; Raw (start -- pos ) in
-	let commit_with_keyword start (end_pos , symb) =
-		let spos=end_pos -String.length symb in
-		glob_pos := end_pos+1;
-		token_stack := Keyword symb ::!token_stack;
-		Raw ( start -- spos ) in 
-	let rec lexing start aut stack pos=
-		let c =st.[pos] in
+	let commit start ende= 
+		glob_loc :=  incr ende;
+		raw start ende in
+	let commit_with_keyword start (ende , symb) =
+		let len= String.length symb in
+		let mid=decr ende len in
+		glob_loc := incr ende;
+		token_stack := {start=mid;ende; token=Keyword symb} ::!token_stack;
+		raw start mid in 
+	let rec lexing start aut stack ende=
+		let c =st.[ende.nchar] in
 		let aut = aut.transition c in
-		let stack  = may (fun stack newf -> (pos,newf)::stack) stack aut.state in
+		let stack  = may (fun stack newf -> (ende,newf)::stack) stack aut.state in
 		begin
-			match (aut==aut_start_t, stack, pos + 1 < lmax ) with
+			match (aut==aut_start_t, stack, ende.nchar + 1 < lmax ) with
 			| (true, a::q, _ ) -> commit_with_keyword start a
-			| (_,_,true) ->  lexing start aut stack (pos+1)
-			| (_,_,false) ->   commit start pos
+			| (_,_,true) ->  lexing start aut stack (incr_char ende c)
+			| (_,_,false) ->   commit start ende
 		end in
-	fun () -> match (!token_stack, !glob_pos<lmax) with
+	fun () -> match (!token_stack, !glob_loc.nchar<lmax) with
 		| a :: q, _ -> token_stack:= q ; a
-		| [], true ->  ( lexing !glob_pos aut_start_t [] !glob_pos )
-		| [], false -> End 
+		| [], true ->  ( lexing !glob_loc aut_start_t [] !glob_loc )
+		| [], false -> { start= !glob_loc; ende= !glob_loc; token=End} 
  
 
 
@@ -82,43 +96,51 @@ loop ()
 open Printf 
 
 let print_lex = function
-| Raw s -> printf "Text{%s}\n" s
-| Keyword s -> printf "Keyword{%s}\n" s 
-| End -> ()
+| {token=Raw s; _} -> printf "Text{%s}\n" s
+| {token=Keyword s; _} -> printf "Keyword{%s}\n" s 
+| {token=End; _ } -> ()
 
 
 
 exception Hydra_syntax_error of string 
 
+let error {start;ende;token} messg= 
+	let sprint_loc loc = Printf.sprintf "(col %d, line %d)" loc.ncol loc.nline in
+	let sprint_token = function Raw s -> s | Keyword s -> s | End -> "end"  in
+	let messgE= Printf.sprintf 
+	"Syntax error : %s while reading token %s from %s to %s" messg (sprint_token token)  (sprint_loc start) (sprint_loc ende) 
+	in
+	raise @@ Hydra_syntax_error messgE
+ 
 let parse_hydra token_source  =
 	let continue f= f @@ token_source () in
 	let ( ||> ) a b = a::(continue b) in
-	let rec parse_tex= function
+	let rec parse_tex loc_token= match loc_token.token with 
 		| Raw(a) -> Text(a) ||> parse_tex
 		| Keyword "<§" -> PyInclusion (continue parse_pynclusion) ||> parse_tex
 		| Keyword "§:" -> Python (continue parse_python) ||> parse_tex
 		| End -> []
-		| Keyword "¤" -> raise @@ Hydra_syntax_error "Tex inclusion are not allowed in Tex mode"
-		| _ -> raise @@ Hydra_syntax_error "Closing an unopened block"
-	and parse_pynclusion = function
+		| Keyword "¤" -> error loc_token "latex inclusion are not allowed in latex mode"
+		| _ -> error loc_token "closing an unopened block"
+	and parse_pynclusion loc_token= match loc_token.token with 
 			| Raw(a) ->  Text(a)::(continue parse_pynclusion)
 			| Keyword "§>" -> []
 			| Keyword "¤" -> TexInclusion(continue parse_texinclusion) ||> parse_pynclusion
-			| Keyword "§:" -> raise @@ Hydra_syntax_error "Python mode is not allowed inside python inclusion"
-			| _ -> raise @@ Hydra_syntax_error "Closing an unopened block"
-	and parse_python = function
+			| Keyword "§:" -> error loc_token "python mode is not allowed inside python inclusion"
+			| _ -> error loc_token "closing an unopened block"
+	and parse_python loc_token= match loc_token.token with 
 		| Keyword ":§" -> []
 		| Raw(p) -> Text(p) ||> parse_python
 		| Keyword "<§" ->  PyInclusion(continue parse_pynclusion) ||> parse_python
 		| Keyword "¤" ->  TexInclusion(continue parse_texinclusion) ||> parse_python
-		| Keyword "§:" -> raise @@ Hydra_syntax_error "Already in python mode"
-		| _ -> raise @@ Hydra_syntax_error "Closing an unopened block"
-	and parse_texinclusion = function
+		| Keyword "§:" -> error loc_token "already in python mode"
+		| _ -> error loc_token "closing an unopened block"
+	and parse_texinclusion loc_token= match loc_token.token with 
 		| Keyword "¤"-> []
 		| Raw t -> Text(t) ||> parse_texinclusion
 		| Keyword "<§" ->  PyInclusion(continue parse_pynclusion) ||> parse_texinclusion
-		| Keyword "§:" -> raise @@ Hydra_syntax_error "Python mode not allowed in tex inclusion"
-		| _ -> raise @@ Hydra_syntax_error "Closing an unopened block" 
+		| Keyword "§:" -> error loc_token "python mode not allowed in tex inclusion"
+		| _ -> error loc_token "Closing an unopened block" 
 in 
 continue parse_tex 
 
