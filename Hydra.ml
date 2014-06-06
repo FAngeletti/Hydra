@@ -1,7 +1,11 @@
 
-type hydre = Text of string | Python of  hydres | PyInclusion of hydres |  TexInclusion of hydres 
+open Printf 
+
+type kind = Tex | Python | Inclusion
+type hydre = Text of string | Node of kind*hydres 
 and hydres = hydre list
 
+let sprint_kind = function Tex ->  "Tex" | Python -> "Python" | Inclusion -> "Inclusion" 
 
 type automaton  ={state: string option ; transition:char -> automaton }
 
@@ -93,7 +97,6 @@ let iter f lex=
 	in 
 loop ()
 
-open Printf 
 
 let print_lex = function
 | {token=Raw s; _} -> printf "Text{%s}\n" s
@@ -117,28 +120,28 @@ let parse_hydra token_source  =
 	let ( ||> ) a b = a::(continue b) in
 	let rec parse_tex loc_token= match loc_token.token with 
 		| Raw(a) -> Text(a) ||> parse_tex
-		| Keyword "<§" -> PyInclusion (continue parse_pynclusion) ||> parse_tex
-		| Keyword "§:" -> Python (continue parse_python) ||> parse_tex
+		| Keyword "<§" -> Node (Inclusion, continue parse_pynclusion) ||> parse_tex
+		| Keyword "§:" -> Node(Python, continue parse_python) ||> parse_tex
 		| End -> []
 		| Keyword "¤" -> error loc_token "latex inclusion are not allowed in latex mode"
 		| _ -> error loc_token "closing an unopened block"
 	and parse_pynclusion loc_token= match loc_token.token with 
 			| Raw(a) ->  Text(a)::(continue parse_pynclusion)
 			| Keyword "§>" -> []
-			| Keyword "¤" -> TexInclusion(continue parse_texinclusion) ||> parse_pynclusion
+			| Keyword "¤" -> Node(Tex, continue parse_texinclusion) ||> parse_pynclusion
 			| Keyword "§:" -> error loc_token "python mode is not allowed inside python inclusion"
 			| _ -> error loc_token "closing an unopened block"
 	and parse_python loc_token= match loc_token.token with 
 		| Keyword ":§" -> []
 		| Raw(p) -> Text(p) ||> parse_python
-		| Keyword "<§" ->  PyInclusion(continue parse_pynclusion) ||> parse_python
-		| Keyword "¤" ->  TexInclusion(continue parse_texinclusion) ||> parse_python
+		| Keyword "<§" ->  Node(Inclusion,continue parse_pynclusion) ||> parse_python
+		| Keyword "¤" ->  Node(Tex, continue parse_texinclusion) ||> parse_python
 		| Keyword "§:" -> error loc_token "already in python mode"
 		| _ -> error loc_token "closing an unopened block"
 	and parse_texinclusion loc_token= match loc_token.token with 
 		| Keyword "¤"-> []
 		| Raw t -> Text(t) ||> parse_texinclusion
-		| Keyword "<§" ->  PyInclusion(continue parse_pynclusion) ||> parse_texinclusion
+		| Keyword "<§" ->  Node(Inclusion, continue parse_pynclusion) ||> parse_texinclusion
 		| Keyword "§:" -> error loc_token "python mode not allowed in tex inclusion"
 		| _ -> error loc_token "Closing an unopened block" 
 in 
@@ -149,14 +152,15 @@ continue parse_tex
 let rec sprint hydres = String.concat ";" ( List.map sprintEl hydres ) 
 and sprintEl= function
 | Text(s) -> sprintf "Text<<%s>>"  s 
-| Python(hs) -> sprintf "Python<<%s>>" (sprint hs) 
-| PyInclusion(hs) -> sprintf "Inclusion[Python]<<%s>>" (sprint hs)
-| TexInclusion(hs) -> sprintf "Inclusion[Latex]<<%s>>" (sprint hs)
+| Node(kind, hs) -> sprintf "Node{%s}<<%s>>" (sprint_kind kind)  (sprint hs) 
 
 
 
-let preambule chan latexname =
-fprintf chan 
+
+type env = {mutable ntab : int; pyx : out_channel ; latex_name : string; pygen_name : string  }
+
+let preambule env =
+fprintf env.pyx 
 "#!/usr/bin/env python 
 #This is an automatically generated python generator file.
 __latexFile__=open('%s', 'w+')
@@ -164,22 +168,18 @@ __latexFile__=open('%s', 'w+')
 def __writeLatexFile__(str):
 	__latexFile__.write(str)
 
-def __readLatexFile__():
-	return str(__latexFile__)
 
-__ContextStack__ = [ (__readLatexFile__,__writeLatexFile__) ]
+__ContextStack__ = []
 
 def __newContext__():
-	context=\"\"
-	def write(str):
-		context+=str
-	def read():
-		return context 
-	__ContextStack__.append( (read,write) )
+	__ContextStack__.append(\"\")
 
 
 def __latex__(str):
-	__ContextStack__[0][1](str)
+	if len(__ContextStack__) > 0 :
+		__ContextStack__[0]+=(str)
+	else:
+		__writeLatexFile__(str)
 
 def __pynclusion__(obj):
 	try:
@@ -189,22 +189,27 @@ def __pynclusion__(obj):
 	__latex__(s)
 
 def __popContext__():
-	(r,w)=__ContextStack__.pop()
-	__latex__(r())
+	s=__ContextStack__.pop()
+	__latex__(s)
 
 
-" latexname
+" env.latex_name
 
+let end_compilation env  = 
+	close_out env.pyx;
+	let error1 = Sys.command ("chmod u+x "^env.pygen_name) in
+	let error2 = Sys.command ("./"^env.pygen_name) in
+	match (error1,error2)  with
+		| 0,0 -> ()
+		| _ -> printf "Sorry something has gone wrong \n"
+	
 
-let pygenName s =   "gen_"^s^".py" 
-let latexName s =   s^".tex" 
-
-
-type env = {mutable ntab : int; pyx : out_channel }
 
 let init_env basename = 
-let pyx = pygenName basename |> open_out in
-{ntab=0;pyx}
+	let pygen_name =  "gen_"^basename^".py" 
+	and latex_name = basename^".tex" in 
+	let pyx =pygen_name |> open_out in
+	{ntab=0;pyx; pygen_name; latex_name }
 
 
 let count_tab s = 
@@ -218,78 +223,84 @@ let print_tabs env=
 		 output_char env.pyx '\t' 
 	done
 
-let latexW env  =print_tabs env ;  fprintf env.pyx "__latex__(r'''%s''')\n"  
-let pythonW env s = String.trim s |> fprintf env.pyx "%s \n"
-let inpythonW env s = 
-	print_tabs env ;
-	match String.trim s with
-	| "" -> ()
-	| s -> fprintf env.pyx "__pynclusion__(%s)\n" s
-let intexW env middle = 
-	fprintf env.pyx "__newContext__()\n";
-	middle () ;
-	print_tabs env; fprintf env.pyx "__popContext__()\n"
-
 exception Illformed_ast
 
-let transcompile mode env hydres  = List.iter (mode env) hydres
+type 'env backend = {
+	init_env : string -> 'env;
+	preambule : 'env -> unit;
+	write_node : 'env -> kind -> kind -> (unit -> unit ) -> unit;
+	write_text : 'env -> kind -> string -> unit;
+	end_compilation : 'env -> unit
+}
 
-let rec latex_mode env = function
-| Text(s) -> latexW env s
-| Python(s) -> transcompile (python_mode) env s
-| PyInclusion(s) -> transcompile (python_incl_mode) env s
-| _ -> raise Illformed_ast
-and python_mode env = function
-| Text(s) -> env.ntab<- count_tab s; pythonW env s
-| PyInclusion(s) -> transcompile (python_incl_mode) env s
-| TexInclusion(s) -> intexW env @@  fun () -> transcompile (tex_incl_mode) env s 
-| _ -> raise Illformed_ast
-and python_incl_mode env = function
-| Text(s) -> inpythonW env s
-| TexInclusion(s) -> intexW env @@ fun () -> transcompile (tex_incl_mode) env s 
-| _ -> raise Illformed_ast
-and tex_incl_mode env = function
-| Text(s) -> latexW env s
-| PyInclusion(s) ->  transcompile (python_incl_mode) env s  
-| _ -> raise Illformed_ast
+let latex_backend = {
+	init_env;
+	preambule; 
+	write_text=( fun env kind s -> match kind with
+		| Tex -> print_tabs env ;  fprintf env.pyx "__latex__(r'''%s''')\n"   s
+		| Python -> env.ntab<- count_tab s ; String.trim s |> fprintf env.pyx "%s \n"
+		| Inclusion -> begin match String.trim s with
+				| "" -> ()
+				| s -> print_tabs env ; fprintf env.pyx "__pynclusion__(%s)\n" s	
+			end
+		);
+	write_node =( fun env ext_kind inner_kind delayed -> match (ext_kind,inner_kind) with
+		| (_, Tex ) ->  print_tabs env ; fprintf env.pyx "__newContext__()\n";
+				delayed () ;
+				print_tabs env; fprintf env.pyx "__popContext__()\n"
+		| _         ->  delayed ()
+	);
+	end_compilation;
+}
+
+type py_env = {py : out_channel; pyname : string }
+
+let python_backend = {
+	init_env  = (fun basename ->  let pyname = basename^".py" in {pyname; py = open_out pyname} ) ; 
+	preambule =( fun env -> output_string env.py "r'''" ); 
+	write_text=( fun env kind s -> output_string env.py s);
+	write_node =( fun env ext_kind inner_kind delayed -> match (ext_kind,inner_kind) with
+		| (_, Tex )   ->  fprintf env.py " r''' "; delayed () ; fprintf env.py " ''' "
+		| (Tex,Python) -> fprintf env.py " ''' \n "; delayed () ;  fprintf env.py " \n r''' "
+		| _         ->     delayed ()
+	);
+	end_compilation  = (fun  env -> output_string env.py "'''"; close_out env.py);
+}
 
 
-(*
 
-let rec  transf mode env hydres  = List.iter (mode env) hydres 
-and latex env = function
-| Text(s) ->  latexW env.pyx s
-| Section(name, hydres) ->   transf  latex (select env name) hydres  
-| Python(cont, hydres) ->  transf python (select env cont)  hydres
-| PyInclusion(s) -> inpythonW 0 env.pyx s 
-and python env = function
-| Text(s) ->  env.ntab<- count_tab s;  pythonW ( "" |: env ) s
-| Section(name,hydres) -> transf latex (select env name) hydres 
-| Python(cont, hydres) ->  transf python (select env cont)  hydres
-| PyInclusion(s) -> inpythonW env.ntab env.pyx s 
-*)
 
+let transcompile backend basename hydres=
+	let env = backend.init_env basename in
+	let rec transcompile current_kind hydres = List.iter (transcompile_node current_kind) hydres
+	and transcompile_node current_kind = function
+		| Text(s) -> backend.write_text env current_kind s
+		| Node( new_kind, hydres ) -> backend.write_node env current_kind new_kind @@ fun () -> transcompile new_kind hydres in
+	backend.preambule env;
+	transcompile Tex hydres;
+	backend.end_compilation env
 
 let load f= 
  let cin = open_in f in
  let n= in_channel_length cin in
- let s=String.create n in
- ignore(input cin s 0 n); s   
+ let s=Bytes.create n in
+ ignore(input cin s 0 n); Bytes.to_string s   
 
-
-let ()=  		
-	let path=Sys.argv.(1) in
+exception Unknown_mode
+let ()=  
+	let rec mode = ref "latex" in		
+	let spec = ["--mode", Arg.Set_string mode, "Define the output mode"] in
+	let rpath = ref "" in
+	let () = Arg.parse spec (fun path -> rpath:=path) "hydra --mode `mode source.hyd" in
+	let path= !rpath in
 	let basename = Filename.chop_extension path in
-	let gen = pygenName basename in 
-	let env = init_env basename in
-	latexName basename |> preambule env.pyx; 
-	load path |> lex |> parse_hydra |> transcompile latex_mode env; close_out env.pyx; 
-	let error1 = Sys.command ("chmod u+x "^gen) in
-	let error2 = Sys.command ("./"^gen) in
-	match (error1,error2)  with
-		| 0,0 -> ()
-		| _ -> printf "Sorry something has gone wrong \n"
-	 
+	let compile = match !mode with 
+		| "latex" -> transcompile latex_backend 
+		| "python" -> transcompile python_backend
+		| _ -> raise Unknown_mode  in 
+	let ast =  load path |> lex |> parse_hydra in
+	compile basename ast 
+ 
 
 
 
