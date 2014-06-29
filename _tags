@@ -15,3 +15,5 @@
 "_darcs": not_hygienic
 # Executable hydra
 # OASIS_STOP
+<**/*.ml> or <**/*.mli> or <**/*.mlpack> or <**/*.ml.depends>: ocaml
+<backends> : include
