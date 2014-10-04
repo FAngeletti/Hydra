@@ -1,60 +1,54 @@
 open Lexer
 open Printf
 
-type kind = Tex | Python | Inclusion
-type hydre = Text of string | Node of kind*hydres 
+
+type hydre =  Text of string | Node of kind*hydres 
 and hydres = hydre list
 
-let sprint_kind = function Tex ->  "Tex" | Python -> "Python" | Inclusion -> "Inclusion" 
 
 
 exception Hydra_syntax_error of string 
 
+let str_loc loc =  Printf.sprintf "(col %d, line %d)" loc.ncol loc.nline
+
 let error {start;ende;token} messg= 
-	let sprint_loc loc = Printf.sprintf "(col %d, line %d)" loc.ncol loc.nline in
-	let sprint_token = function Raw s -> s | Keyword s -> s | End -> "end"  in
 	let messgE= Printf.sprintf 
-	"Syntax error : %s while reading token %s from %s to %s" messg (sprint_token token)  (sprint_loc start) (sprint_loc ende) 
+	"Syntax error : %s while reading token %s from %s to %s" messg (str_token token)  (str_loc start) (str_loc ende) 
 	in
 	raise @@ Hydra_syntax_error messgE
+
+let verify error extern inner = match extern, inner with
+	| Inclusion, Code -> error"[Code] environment cannot be nested inside [Inclusion] environment" 	
+	| _ -> () (* fine *) 
  
 let parse_hydra token_source  =
+	let sp = Printf.sprintf in
 	let continue f= f @@ token_source () in
 	let ( ||> ) a b = a::(continue b) in
-	let rec parse_tex loc_token= match loc_token.token with 
-		| Raw(a) -> Text(a) ||> parse_tex
-		| Keyword "<§" -> Node (Inclusion, continue parse_pynclusion) ||> parse_tex
-		| Keyword "§:" -> Node(Python, continue parse_python) ||> parse_tex
+	let rec parse_text loc_token= match loc_token.token with 
+		| Raw(a) -> Text(a) ||> parse_text
+		| Keyword(Capture, _) -> error loc_token "capture environment are not authorised inside text"
+		| Keyword(k,R) -> error loc_token @@ sp "closing an unopened [%s] environment" (str_kind k)   		
+		| Keyword (k, p) -> Node(k, continue @@ parse_kind (reverse p) k ) ||> parse_text
 		| End -> []
-		| Keyword "¤" -> error loc_token "latex inclusion are not allowed in latex mode"
-		| _ -> error loc_token "closing an unopened block"
-	and parse_pynclusion loc_token= match loc_token.token with 
-			| Raw(a) ->  Text(a)::(continue parse_pynclusion)
-			| Keyword "§>" -> []
-			| Keyword "¤" -> Node(Tex, continue parse_texinclusion) ||> parse_pynclusion
-			| Keyword "§:" -> error loc_token "python mode is not allowed inside python inclusion"
-			| _ -> error loc_token "closing an unopened block"
-	and parse_python loc_token= match loc_token.token with 
-		| Keyword ":§" -> []
-		| Raw(p) -> Text(p) ||> parse_python
-		| Keyword "<§" ->  Node(Inclusion,continue parse_pynclusion) ||> parse_python
-		| Keyword "¤" ->  Node(Tex, continue parse_texinclusion) ||> parse_python
-		| Keyword "§:" -> error loc_token "already in python mode"
-		| _ -> error loc_token "closing an unopened block"
-	and parse_texinclusion loc_token= match loc_token.token with 
-		| Keyword "¤"-> []
-		| Raw t -> Text(t) ||> parse_texinclusion
-		| Keyword "<§" ->  Node(Inclusion, continue parse_pynclusion) ||> parse_texinclusion
-		| Keyword "§:" -> error loc_token "python mode not allowed in tex inclusion"
-		| _ -> error loc_token "closing an unopened block" 
-in 
-continue parse_tex 
+	and parse_kind polarity kind loc_token = match loc_token.token with
+		| Raw(a) -> Text(a) ||> parse_kind polarity kind
+		| Keyword( k , p ) -> begin match (k=kind , p=polarity, p) with
+			| true, true, _ -> []
+			| true, false, _ -> error loc_token @@ sp "[%s] environment nesting" (str_kind kind)
+			| false, _ , R -> error loc_token @@ sp "closing an unopened [%s] environment" (str_kind kind)   
+			| false, _, p -> verify (error loc_token) kind k; Node(k,continue @@ parse_kind (reverse p) k ) ||> parse_kind polarity kind  
+		end
+		| End -> raise @@ Hydra_syntax_error ( sp "Unexpected end of file when in [%s] environment " (str_kind kind) )
+	
+	in 
+	continue parse_text 
 
 
 
 let rec sprint hydres = String.concat ";" ( List.map sprintEl hydres ) 
 and sprintEl= function
 | Text(s) -> sprintf "Text<<%s>>"  s 
-| Node(kind, hs) -> sprintf "Node{%s}<<%s>>" (sprint_kind kind)  (sprint hs) 
+| Node(kind, hs) -> sprintf "Node{%s}<<%s>>" (str_kind kind)  (sprint hs) 
 
 

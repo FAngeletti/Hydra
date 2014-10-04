@@ -1,4 +1,5 @@
 open Printf
+open Lexer
 open Compiler
 open Parser
 type env = { pyx : out_channel ; mutable ntab : int ; pygen_name : string ; latex_name: string }
@@ -69,19 +70,24 @@ let print_tabs env=
 let backend = transcompile {
 	init_env;
 	preambule; 
-	write_text=( fun env kind s -> match kind with
-		| Tex -> print_tabs env ;  fprintf env.pyx "__latex__(r'''%s''')\n"   s
-		| Python -> env.ntab<- count_tab s ; String.trim s |> fprintf env.pyx "%s \n"
+	write_text=( fun env kind s -> 
+	let ($) s a  = fprintf env.pyx "%s(%s)\n" s a and
+	(!) s = sprintf "r'''%s'''" s  in
+	match kind with
+		| Text | Capture -> print_tabs env ;  "__latex__" $ !s 
+		| Code -> env.ntab<- count_tab s ; String.trim s |> fprintf env.pyx "%s \n"
 		| Inclusion -> begin match String.trim s with
 				| "" -> ()
-				| s -> print_tabs env ; fprintf env.pyx "__pynclusion__(%s)\n" s	
-			end
+				| s -> print_tabs env ; "__pynclusion__" $ s	
+			end 
 		);
-	write_node =( fun env ext_kind inner_kind delayed -> match (ext_kind,inner_kind) with
-		| (_, Tex ) ->  print_tabs env ; fprintf env.pyx "__newContext__()\n";
-				delayed () ;
-				print_tabs env; fprintf env.pyx "__popContext__()\n"
-		| _         ->  delayed ()
+	write_node =( fun env kind hydres k ->
+		let ($) s a  = fprintf env.pyx "%s(%s)\n" s a in
+		 match kind with
+		| Capture ->  print_tabs env ;  "__newContext__" $ "";
+				k hydres ;
+				print_tabs env; "__popContext__" $ ""
+		| _         ->  k hydres
 	);
 	end_compilation;
 }

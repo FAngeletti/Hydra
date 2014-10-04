@@ -1,7 +1,7 @@
 OASISFormat: 0.4
 Name:        Hydra
-Version:     0.8
-Synopsis:    Python script inside latex file
+Version:     0.9
+Synopsis:    Generic lightweight template engine
 Authors:     F. Angeletti
 License:     GPL-3.0
 

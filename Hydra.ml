@@ -8,27 +8,39 @@ let load f=
 
 module M= Map.Make(String)
 
+let frontends = List.fold_left (fun set (x,y) -> M.add x y  set ) M.empty [ "python", Lexer.py_aut; "generic", Lexer.gen_a ]  
+
 let backends = List.fold_left (fun set (x,y) -> M.add x y  set ) M.empty [ "python", Python.backend; "latex", Latex.backend ]  
 
 exception Unknown_mode of string
+exception Unknown_option of string*string
+
+
 let ()=  
 	let ( !! )  = Printf.printf in
 	try begin
+	let syntax = ref "python" in
 	let mode = ref "latex" in		
-	let spec = ["--mode", Arg.Set_string mode, "Define the output mode"] in
+	let spec = ["--mode", Arg.Set_string mode, "Define the template engine mode"; "--syntax", Arg.Set_string syntax, "Define the template syntax variant"  ] in
 	let rpath = ref "" in
-	let () = Arg.parse spec (fun path -> rpath:=path) "hydra --mode `mode source.hyd" in
+	let () = Arg.parse spec (fun path -> rpath:=path) "hydra --mode `mode --syntax `syn source.hyd" in
 	let path= !rpath in
 	let basename = Filename.chop_extension path in
 	let compile = try M.find !mode backends with
-		| Not_found -> raise @@ Unknown_mode !mode   in 
-	let ast =  load path |> Lexer.lex |> Parser.parse_hydra in
+		| Not_found -> raise @@ Unknown_option ("mode",!mode)   in 
+	let lexer = try Lexer.lex @@ M.find !syntax frontends with 
+		|Not_found ->  raise @@ Unknown_option ("syntax",!syntax) in
+	let ast =  load path |> lexer |> Parser.parse_hydra in
 	compile basename ast 
  	end with
-	| Unknown_mode mode -> 
-		!! " The requested mode  `%s` does not correspond to any known mode. \n"  mode;
-		!! " The available modes are: \n "; 
-		M.iter (fun s _ -> !! " \t - %s\n" s) backends
+	| Unknown_option (name, opt)  -> begin
+		!! " The requested %s  `%s` does not correspond to any known %s. \n"  name opt name;
+		!! " The available %s are: \n " name;
+		match name with 
+			| "syntax" ->   M.iter (fun s _ -> !! " \t - %s\n" s) frontends
+			| "mode" -> M.iter (fun s _ -> !! " \t - %s\n" s) backends
+			| _ -> !!"?"
+		end	
 	|Parser.Hydra_syntax_error s -> !! "There was a syntax error while parsing the input file. \n%s\n " s 
 
 
