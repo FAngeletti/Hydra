@@ -9,9 +9,9 @@ let backend = transcompile {
 	preambule =( fun env -> output_string env.py "r'''" ); 
 	write_text=( fun env kind s -> output_string env.py s);
 	write_node =( fun env kind hydres k -> match kind with
-		| Capture   ->  fprintf env.py " r''' "; k hydres ; fprintf env.py " ''' "
-		| Code -> fprintf env.py " ''' \n "; k hydres ;  fprintf env.py " \n r''' "
-		| _         ->     k hydres
+		| Capture   ->  fprintf env.py " r''' "; k env hydres ; fprintf env.py " ''' "
+		| Code -> fprintf env.py " ''' \n "; k env hydres ;  fprintf env.py " \n r''' "
+		| _         ->     k env hydres
 	);
 	end_compilation  = (fun  env -> output_string env.py "'''"; close_out env.py);
 }

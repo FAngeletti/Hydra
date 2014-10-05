@@ -10,10 +10,11 @@ module M= Map.Make(String)
 
 let frontends = List.fold_left (fun set (x,y) -> M.add x y  set ) M.empty [ "python", Lexer.py_aut; "generic", Lexer.gen_a ]  
 
-let backends = List.fold_left (fun set (x,y) -> M.add x y  set ) M.empty [ "python", Python.backend; "latex", Latex.backend ]  
+let backends = List.fold_left (fun set (x,y) -> M.add x y  set ) M.empty [ "python", Python.backend; "latex", Latex.backend; "ocaml_i", Ocaml_i.backend  ]  
 
 exception Unknown_mode of string
 exception Unknown_option of string*string
+
 
 
 let ()=  
@@ -30,7 +31,7 @@ let ()=
 		| Not_found -> raise @@ Unknown_option ("mode",!mode)   in 
 	let lexer = try Lexer.lex @@ M.find !syntax frontends with 
 		|Not_found ->  raise @@ Unknown_option ("syntax",!syntax) in
-	let ast =  load path |> lexer |> Parser.parse_hydra in
+	let ast =  load path |> lexer |> Parser.parse_hydra in 
 	compile basename ast 
  	end with
 	| Unknown_option (name, opt)  -> begin
@@ -42,10 +43,5 @@ let ()=
 			| _ -> !!"?"
 		end	
 	|Parser.Hydra_syntax_error s -> !! "There was a syntax error while parsing the input file. \n%s\n " s 
-
-
-
-
-
 
   

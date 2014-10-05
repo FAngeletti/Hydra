@@ -85,9 +85,9 @@ let backend = transcompile {
 		let ($) s a  = fprintf env.pyx "%s(%s)\n" s a in
 		 match kind with
 		| Capture ->  print_tabs env ;  "__newContext__" $ "";
-				k hydres ;
+				k env hydres ;
 				print_tabs env; "__popContext__" $ ""
-		| _         ->  k hydres
+		| _         ->  k env hydres
 	);
 	end_compilation;
 }
