@@ -1,8 +1,17 @@
 open Lexer
 open Printf
+type z = Nil_Z
+type 'a fragment = 'a * string
+type simple  = [`Raw| `Inclusion ] fragment  
+type _ extension = 
+	| S : simple -> z extension
+	| A : z extension -> 'a extension extension  
+	| E : 'a extension list -> ('a extension) extension
 
+type basic = z extension
+type with_capture = basic extension
 
-type hydre =  Text of string | Node of kind*hydres 
+type hydre = with_capture extension
 and hydres = hydre list
 
 
@@ -10,6 +19,7 @@ and hydres = hydre list
 exception Hydra_syntax_error of string 
 
 let str_loc loc =  Printf.sprintf "(col %d, line %d)" loc.ncol loc.nline
+let sp = Printf.sprintf
 
 let error {start;ende;token} messg= 
 	let messgE= Printf.sprintf 
@@ -20,35 +30,55 @@ let error {start;ende;token} messg=
 let verify error extern inner = match extern, inner with
 	| Inclusion, Code -> error"[Code] environment cannot be nested inside [Inclusion] environment" 	
 	| _ -> () (* fine *) 
- 
+
+let close_error loc_token k = error loc_token @@ sp "closing an unopened [%s] environment" (str_kind k)   	 
+let unexpected_end loc_token k = error loc_token @@ sp "unexped end inside [%s] environment" (str_kind k)  
+let no_nesting loc_token =  error loc_token "no other environment are allowed inside [Inclusion] environment" 
+let wrong_polarity loc_token p =  error loc_token @@ sp "wrong polarity %s" ( str_polarity p )  
+
 let parse_hydra token_source  =
-	let sp = Printf.sprintf in
 	let continue f= f @@ token_source () in
+	let cont_p p f = continue (f @@ reverse p) in
 	let ( ||> ) a b = a::(continue b) in
-	let rec parse_text loc_token= match loc_token.token with 
-		| Raw(a) -> Text(a) ||> parse_text
+	let rec parse_text loc_token = match loc_token.token with 
+		| Raw(a) -> A(S(`Raw,a)) ||> parse_text
+		| Keyword(k,R)  -> close_error loc_token k
+		| Keyword(Inclusion, p ) -> A(cont_p p parse_inclusion) ||> parse_text
+		| Keyword(Code, p ) ->  E(cont_p p parse_code) ||> parse_text
 		| Keyword(Capture, _) -> error loc_token "capture environment are not authorised inside text"
-		| Keyword(k,R) -> error loc_token @@ sp "closing an unopened [%s] environment" (str_kind k)   		
-		| Keyword (k, p) -> Node(k, continue @@ parse_kind (reverse p) k ) ||> parse_text
 		| End -> []
-	and parse_kind polarity kind loc_token = match loc_token.token with
-		| Raw(a) -> Text(a) ||> parse_kind polarity kind
-		| Keyword( k , p ) -> begin match (k=kind , p=polarity, p) with
-			| true, true, _ -> []
-			| true, false, _ -> error loc_token @@ sp "[%s] environment nesting" (str_kind kind)
-			| false, _ , R -> error loc_token @@ sp "closing an unopened [%s] environment" (str_kind kind)   
-			| false, _, p -> verify (error loc_token) kind k; Node(k,continue @@ parse_kind (reverse p) k ) ||> parse_kind polarity kind  
-		end
-		| End -> raise @@ Hydra_syntax_error ( sp "Unexpected end of file when in [%s] environment " (str_kind kind) )
-	
+	and parse_code p loc_token = match loc_token.token with
+		| Raw(a) -> A(S(`Raw,a)) ||> parse_code p
+		| Keyword(k,R) -> close_error loc_token k
+		| Keyword(Code, polarity) when polarity = p -> [] 
+		| Keyword(Code, p) -> wrong_polarity loc_token p
+		| Keyword(Inclusion,p) -> A(cont_p p parse_inclusion) ||> parse_code p
+		| Keyword(Capture,p) -> E(cont_p p parse_capture) ||> parse_code p
+		| End -> unexpected_end loc_token Code
+	and parse_capture p loc_token = match loc_token.token with
+		| Raw(a) -> S(`Raw, a) ||> parse_capture p
+		| Keyword(k,R) -> close_error loc_token k
+		| Keyword(Capture, polarity) when polarity = p -> [] 
+		| Keyword(Capture, p) -> wrong_polarity loc_token p
+		| Keyword(Inclusion,p) -> (cont_p p parse_inclusion) ||> parse_capture p
+		| Keyword(Code,p ) -> error loc_token "code environment are not authorised inside capture environment"
+		| End -> unexpected_end loc_token Capture
+	and parse_inclusion p loc_token = match loc_token.token with
+		| Raw(a) -> continue (check_inclusion p) ;  S(`Inclusion,a)
+		| Keyword( k , p ) -> no_nesting loc_token
+		| End -> unexpected_end loc_token Inclusion
+	and check_inclusion p loc_token = match loc_token.token with
+		| Keyword(Inclusion, polarity) when p==polarity -> () 
+		| Keyword(_,_) | Raw _ -> no_nesting loc_token
+		| End -> unexpected_end loc_token Inclusion 	
 	in 
 	continue parse_text 
 
 
 
-let rec sprint hydres = String.concat ";" ( List.map sprintEl hydres ) 
-and sprintEl= function
-| Text(s) -> sprintf "Text<<%s>>"  s 
-| Node(kind, hs) -> sprintf "Node{%s}<<%s>>" (str_kind kind)  (sprint hs) 
-
-
+let rec sprint: type a. a extension list -> string = fun hydres ->  String.concat ";" ( List.map sprintEl hydres ) 
+and sprintEl: type a. a extension -> string = function
+| S (`Raw,s) -> sp "Raw[%s]" s
+| S (`Inclusion, s) -> sp "Inclusion[%s]" s
+| A h -> sprintEl h
+| E hs -> sp "Extension[\n %s \n]" (sprint hs)

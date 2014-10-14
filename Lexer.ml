@@ -3,9 +3,9 @@ open Printf
 type polarity = L | R | T
 let reverse = function L -> R | R->L | T -> T 
 
-type kind = Code | Inclusion | Capture | Text 
+type kind = Code | Inclusion | Capture 
 
-let str_kind = function Code ->  "Code" | Text -> "Text" | Inclusion -> "Inclusion" | Capture -> "Capture" 
+let str_kind = function Code ->  "Code" | Inclusion -> "Inclusion" | Capture -> "Capture" 
 
 type raw_keyword = int * kind * polarity   
 type automaton  ={state: raw_keyword option ; transition:char -> automaton }

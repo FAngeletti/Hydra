@@ -6,13 +6,16 @@ open Lexer
 
 type interpreter = { out : out_channel; inp : in_channel }
 
-type env = {target: string ; ocaml : interpreter; mutable seq: bool } 
-
-let send_write env s = 
-	output_string env.ocaml.out s
+type env = {target: string ; ocaml : interpreter; seq: bool; capt_args : string list } 
 
 let send env s = 
-	env.seq <- false ; send_write env s
+	output_string env.ocaml.out s
+
+let send_unit env s = 
+	send env s ; { env with seq = true }
+
+let send_partial env s = 
+	send env s; {env with seq = false }
 
 let trim s=
 	let len = String.length s - 1 in 
@@ -35,7 +38,7 @@ done
 
 let flush_i env =  (* send env "raise End_of_file;;\n"; *) flush env.ocaml.out (*; read_ocaml env *)
 
-let eval env =  send env ";;\n" ; flush_i env; env.seq <- false 
+let eval env =  send env ";;\n" ; flush_i env; { env with seq = false } 
 
 
 let preambule env = let c = Printf.sprintf
@@ -43,48 +46,53 @@ let preambule env = let c = Printf.sprintf
 module Hydra = struct 
 let f = open_out \"%s\" 
 
-let context = ref []
+let write s= output_string f s
 
-let write s= match !context with
-  |[] -> output_string f s
-  | b :: q -> Buffer.add_string b s
-
-let new_context ()= 
-  let b=Buffer.create 80 in
-  context := b:: !context  
-
-let pop_context () = match !context with
-  | [] -> ()
-  | b::q -> context:=q; Buffer.contents b |> write
 end
 "
 env.target in
 send env c; eval env 
 
 
+let hydra_write env s = 
+	let (!) = send env in
+	let () =   if env.seq then !";"; !"Hydra.write ("; !s; !")\n" in
+	{env with seq = true }  
 
-let write env s=  if env.seq then send_write env ";"  else env.seq <- true ;  send_write env @@ "Hydra.write ("^s^")\n"
-let write_text env s=  write env ("\"" ^ s ^"\"")  
+let escape s = "\"" ^ (String.escaped s) ^ "\""
+
+
+let write_text env = function 
+	| `Raw , s -> hydra_write env @@ escape s; eval env 
+	| `Inclusion, s -> hydra_write env s
+
+let write_code env = function
+	| `Raw, s -> send_partial env s
+	| `Inclusion, s -> hydra_write env s
+
+let write_capture env = function
+	| `Raw, s -> send_partial env @@ String.escaped s; env
+	| `Inclusion, s -> let env= send_partial env "%s" in { env with capt_args = ")"::s::"("::env.capt_args }
+
+let node_code env h k =
+	let env = k env h in
+	eval env
+
+let node_capture env h k =
+	let env = send_partial env "( Printf.fprintf f \"" in 
+	let env = k env h in
+	let () = send env "\""; send env @@ String.concat "" env.capt_args in
+	let env = send_unit env ")" in
+	{env with capt_args = [] } 
 
 let init_env basename = 
 	let target  = basename
 	and inp, out =   (*open_in "ocaml.inpt", open_out "ocaml.out"*)  Unix.open_process "ocaml" in
-	{ target ; ocaml = {out;inp}; seq=false }
+	{ target ; ocaml = {out;inp}; seq=false; capt_args = [] }
 
 
 
 
-let write_text env kind s = 
-	match kind with
-	| Text -> write_text env s ; eval env 
-	| Code -> send env s
-	| Capture -> write_text env s
-	| Inclusion -> write env s 
-			
-let write_node env kind hydres k = match kind with
-	| Code -> k env hydres ; eval env 
-	| Capture ->  send env "begin\nHydra.new_context ()\n"; env.seq<-true; k env hydres;  send env "; Hydra. pop_context ()\nend\n"  
-	| _ -> k env hydres
 			 
 let end_compilation env = send env "flush Hydra.f"; eval env ; ignore ( Unix.close_process (env.ocaml.inp,env.ocaml.out) )
   
@@ -92,8 +100,11 @@ let end_compilation env = send env "flush Hydra.f"; eval env ; ignore ( Unix.clo
 let backend = transcompile {
 	init_env; 
 	preambule;
-	write_node;
 	write_text;
+	write_code;
+	write_capture;
+	node_code;
+	node_capture;
 	end_compilation
 }
 
