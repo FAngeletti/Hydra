@@ -15,18 +15,39 @@ let backends = List.fold_left (fun set (x,y) -> M.add x y  set ) M.empty [ "pyth
 exception Unknown_mode of string
 exception Unknown_option of string*string
 
+let suffix s=
+	let rec dot_pos k= if s.[k] = '.' || k=0 then k else dot_pos (k-1) in
+	let last = String.length s  - 1in
+	let pos = dot_pos @@ last in
+	String.sub s (pos + 1) @@ last - pos 
+ 
 
+let extension_hints = function
+	| "hytex" -> Some ( "python"), Some( "latex" )
+	| "hyml" ->  Some( "generic" ) , Some ("ocaml_i" )
+	| _ -> None, None
+
+let merge_hint_option a b default=
+	match !a, b with
+		| "", Some h -> a:= h
+		| "", None -> a:=default
+		| _ -> ()
 
 let ()=  
 	let ( !! )  = Printf.printf in
 	try begin
-	let syntax = ref "python" in
-	let mode = ref "latex" in		
+	let syntax = ref "" in
+	let mode = ref "" in		
 	let spec = ["--mode", Arg.Set_string mode, "Define the template engine mode"; "--syntax", Arg.Set_string syntax, "Define the template syntax variant"  ] in
 	let rpath = ref "" in
 	let () = Arg.parse spec (fun path -> rpath:=path) "hydra --mode `mode --syntax `syn source.hyd" in
 	let path= !rpath in
-	let basename = Filename.chop_extension path in
+	let basename = Filename.chop_extension path
+	and extension = suffix path in
+	let hint_syntax, hint_mode = extension_hints extension in
+	let () = 
+		merge_hint_option syntax hint_syntax "python" ;
+		merge_hint_option mode hint_mode "latex"  in
 	let compile = try M.find !mode backends with
 		| Not_found -> raise @@ Unknown_option ("mode",!mode)   in 
 	let lexer = try Lexer.lex @@ M.find !syntax frontends with 
