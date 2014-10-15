@@ -34,7 +34,7 @@ let verify error extern inner = match extern, inner with
 let close_error loc_token k = error loc_token @@ sp "closing an unopened [%s] environment" (str_kind k)   	 
 let unexpected_end loc_token k = error loc_token @@ sp "unexped end inside [%s] environment" (str_kind k)  
 let no_nesting loc_token =  error loc_token "no other environment are allowed inside [Inclusion] environment" 
-let wrong_polarity loc_token p =  error loc_token @@ sp "wrong polarity %s" ( str_polarity p )  
+let wrong_polarity loc_token p expected =  error loc_token @@ sp "wrong polarity %s when expecting %s" ( str_polarity p ) (str_polarity expected)  
 
 let parse_hydra token_source  =
 	let continue f= f @@ token_source () in
@@ -49,18 +49,18 @@ let parse_hydra token_source  =
 		| End -> []
 	and parse_code p loc_token = match loc_token.token with
 		| Raw(a) -> A(S(`Raw,a)) ||> parse_code p
-		| Keyword(k,R) -> close_error loc_token k
 		| Keyword(Code, polarity) when polarity = p -> [] 
-		| Keyword(Code, p) -> wrong_polarity loc_token p
+		| Keyword(k,R) -> close_error loc_token k
+		| Keyword(Code, polarity) -> wrong_polarity loc_token polarity p
 		| Keyword(Inclusion,p) -> A(cont_p p parse_inclusion) ||> parse_code p
-		| Keyword(Capture,p) -> E(cont_p p parse_capture) ||> parse_code p
+		| Keyword(Capture,polarity) -> E(cont_p polarity parse_capture) ||> parse_code p
 		| End -> unexpected_end loc_token Code
 	and parse_capture p loc_token = match loc_token.token with
 		| Raw(a) -> S(`Raw, a) ||> parse_capture p
-		| Keyword(k,R) -> close_error loc_token k
 		| Keyword(Capture, polarity) when polarity = p -> [] 
-		| Keyword(Capture, p) -> wrong_polarity loc_token p
-		| Keyword(Inclusion,p) -> (cont_p p parse_inclusion) ||> parse_capture p
+		| Keyword(k,R) -> close_error loc_token k
+		| Keyword(Capture, polarity) -> wrong_polarity loc_token polarity p
+		| Keyword(Inclusion,polarity) -> (cont_p polarity parse_inclusion) ||> parse_capture p
 		| Keyword(Code,p ) -> error loc_token "code environment are not authorised inside capture environment"
 		| End -> unexpected_end loc_token Capture
 	and parse_inclusion p loc_token = match loc_token.token with
