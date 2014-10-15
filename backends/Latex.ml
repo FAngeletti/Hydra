@@ -52,8 +52,8 @@ let print_tabs env=
 		 output_char env.pyx '\t' 
 	done
 
-let latex env s= fprintf env.pyx "__latex__(r'''%s''')" s; env
-let pyinclusion env s = fprintf env.pyx "__pyinclusion__(%s)" s; env
+let latex env s= print_tabs env; fprintf env.pyx "__latex__(r'''%s''')\n" s; env
+let pyinclusion env s = print_tabs env; fprintf env.pyx "__pyinclusion__(%s)\n" s; env
 
 let code env s = String.trim s |> fprintf env.pyx "%s \n"; env
 
@@ -65,14 +65,22 @@ let write_code env = function
 	| `Raw, s -> let env' = { env with ntab = count_tab s} in code env' s
 	| `Inclusion, s -> pyinclusion env s
 
+let escaped env s = 
+	for k=0 to String.length s-1 do 
+		match s.[k] with
+			| '{' -> output_string  env.pyx "{{"
+			| '}' -> output_string  env.pyx "}}"
+			|  c  -> output_char env.pyx c
+	done; env
+
 let write_capture env = function 
-	| `Raw, s -> output_string env.pyx s ; env
+	| `Raw, s -> escaped env s
 	| `Inclusion, s -> fprintf env.pyx "{}";  { env with capt_args = s::env.capt_args }
 
 let node_code env cs k = k env cs
 
 let node_capture env cpts k = 
-let ()  =  fprintf env.pyx "__latex__(r'''" in
+let ()  = print_tabs env; fprintf env.pyx "__latex__(r'''" in
 let env = k env cpts in
 let () = fprintf env.pyx "'''.format(%s) )\n" (String.concat "," @@  List.rev env.capt_args) in
 	env
