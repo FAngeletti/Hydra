@@ -10,4 +10,4 @@ Executable "hydra"
   BuildTools: ocamlbuild
   MainIs:     Hydra.ml
   CompiledObject: best
-  Depends: unix 
+  BuildDepends: unix 

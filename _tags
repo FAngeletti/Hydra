@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: ef0901d0f307500793b71e37f029c1c2)
+# DO NOT EDIT (digest: a7ae1553567d5c3c266875191b02d274)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -14,6 +14,8 @@
 "_darcs": -traverse
 "_darcs": not_hygienic
 # Executable hydra
+<Hydra.{native,byte}>: pkg_unix
+<*.ml{,i}>: pkg_unix
 # OASIS_STOP
 <**/*.ml> or <**/*.mli> or <**/*.mlpack> or <**/*.ml.depends>: ocaml
 <backends> : include
