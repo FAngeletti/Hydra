@@ -1,0 +1,12 @@
+opam-version: "1"
+maintainer: "angeletti@achronie.fr"
+build: [
+  [ "oasis" "setup" ]
+  ["ocaml" "setup.ml" "-configure"]
+  ["ocaml" "setup.ml" "-build"]
+  ["ocaml" "setup.ml" "-install"]
+]
+remove: [
+  ["ocamlfind" "remove" "Hydra"]
+]
+depends: ["ocamlfind" "oasis"]

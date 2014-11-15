@@ -1,8 +1,9 @@
-Hydra is a simple template engine for inserting python scripts inside a latex document.
-In brief, Hydra adds three new construct to latex:
-* Insertion block: `<§...§>`
-* Python block: `§:...:§`
-* Capture block : `¤...¤`
+Hydra is a simple generic template engine with python and ocaml backend. 
+
+In brief, Hydra can be used to add three new construct to latex:
+* Insertion blocks: `<§...§>`
+* Code blocks: `§:...:§`
+* Capture blocks : `¤...¤`
 
 # Insertion block
 The python expression inside an insertion block is evaluated and
@@ -19,8 +20,8 @@ becomes
 1 + 2 = 3
 \end{equation}
 ```
-#Python block
-The python block allows to write more lenghty block of code.
+#Code block
+Code blocks allow to write more lenghty block of code.
 We can complexify the previous example into
 ``` latex
 §:
@@ -41,15 +42,14 @@ which becomes
 ```
 
 #Capture block
-The capture block facilitate the use of insertion block inside 
-the python block. More precisely, inside a python block a `¤...¤` block
-represent a latex string which will capture any call to `<§...§>` inside the environnement
+Capture blocks simplifies the writing of long insertion block by capturing inner call to `<§...§>`.
+More precisely, inside a code block a `¤...¤` block represent a latex string which will capture any call to `<§...§>`
 ``` python
-s = ¤ 1 + 2 = <§1+2!> ¤
+¤ 1 + 2 = <§1+2§> ¤
 ```
-is equivalent to the string
+is equivalent to
 ``` python
-s = r'''1 + 2 = 3'''.
+<§ "1+2={}".format(1+2) §>.
 ```
 These blocks can be useful combined with the possibility to use insertion bloc inside a python block.
 For instance
@@ -61,7 +61,7 @@ n=100
 :§
 \begin{align} §:
 	for p in range(2):
-		<§ ¤ \sum_{k=1}^{<§n§>} k^{<§p§>}  = <§ sum(p,n) §> \\ ¤  §>
+		¤ \sum_{k=1}^{<§n§>} k^{<§p§>}  = <§ sum(p,n) §> \\ ¤
 :§ \end{align}
 ```
 becomes 
@@ -73,5 +73,15 @@ becomes
 \end{align}
 ```
  
+#Installation
+Using the opam package manager, it is sufficient to pin the repository using
+```bash
+opam pin /path/to/repository
+```
+
+#Ocaml backend
+An alternative syntax is also available using the `--syntax generic` option. 
+The ocaml backend is selected either by precising the `--mode ocaml_i` option or using hydra on a file with an `.hyml` extension.
+
 
 

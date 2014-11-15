@@ -1,0 +1,6 @@
+An hybrid python+latex compiler
+
+Hydra gives the possibility to include python
+script inside latex-like file. Note that this 
+is a quick and dirty hack with a quite complex data flow:
+hydra file ->> python generator -> latex file  
